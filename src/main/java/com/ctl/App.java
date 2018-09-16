@@ -4,11 +4,15 @@ import com.google.auth.Credentials;
 import com.google.bigtable.admin.v2.ColumnFamily;
 import com.google.bigtable.admin.v2.CreateTableRequest;
 import com.google.bigtable.admin.v2.Table;
+import com.google.bigtable.v2.Cell;
+import com.google.bigtable.v2.MutateRowRequest;
+import com.google.bigtable.v2.Mutation;
 import com.google.cloud.bigtable.config.BigtableOptions;
 import com.google.cloud.bigtable.config.CredentialFactory;
 import com.google.cloud.bigtable.config.CredentialOptions;
 import com.google.cloud.bigtable.grpc.BigtableSession;
 import com.google.cloud.bigtable.grpc.BigtableTableAdminClient;
+import com.google.cloud.bigtable.grpc.BigtableTableName;
 import com.google.cloud.bigtable.grpc.async.BulkMutation;
 import com.google.common.collect.Lists;
 import com.google.api.gax.paging.Page;
@@ -16,6 +20,8 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Bucket;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Descriptors;
 import org.apache.hadoop.hbase.client.Admin;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +29,9 @@ import org.slf4j.LoggerFactory;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.Random;
 
 
 /**
@@ -32,14 +41,18 @@ import java.security.GeneralSecurityException;
 
 public class App 
 {
-    final Logger logger = LoggerFactory.getLogger(App.class);
+    final static Logger logger = LoggerFactory.getLogger(App.class);
     final static String jsonPath = "/home/scott/src/getting-started-python/simple/simple01-scott2-2gen.json";
 
     final static String PROJECT_ID = "simple01-216520";
     final static String INSTANCE_ID = "scott-bigtable01";
     final static String USER_AGENT = "scott2@simple01-216520.iam.gserviceaccount.com";
     final static String COLUMN_FAMILY_NAME = "familyone";
-    final static String TABLE_NAME = "tableone";
+    final static String TABLE_ID = "tabletwo";
+    final static String PROJECT_INSTANCE = "projects/" + PROJECT_ID + "/instances/" + INSTANCE_ID;
+
+
+
 
     private Storage getStorage() throws IOException {
         GoogleCredentials credentials = GoogleCredentials.fromStream(new FileInputStream(jsonPath))
@@ -62,14 +75,14 @@ public class App
         tableBuilder.putColumnFamilies(COLUMN_FAMILY_NAME, ColumnFamily.newBuilder().build());
 
         CreateTableRequest ctr = CreateTableRequest.newBuilder()
-                .setParent("projects/" + PROJECT_ID + "/instances/" + INSTANCE_ID)
-                .setTableId(TABLE_NAME)
+                .setParent(PROJECT_INSTANCE)
+                .setTableId(TABLE_ID)
                 .setTable(tableBuilder.build())
                 .build();
         return ctr;
     }
 
-    public void toBigTable() throws IOException, GeneralSecurityException {
+    public BigtableSession getSession() throws IOException, GeneralSecurityException {
 
         Credentials cred = CredentialFactory.getInputStreamCredential(new FileInputStream(jsonPath));
 
@@ -81,37 +94,64 @@ public class App
                     .setCredentialOptions(CredentialOptions.credential(cred)
                     ).build());
 
-            //Connection connection = BigtableConfiguration.connect("simple01-216520", "scott-bigtable01");
-//        Configuration config = BigtableConfiguration.configure(projectId, instanceId);
-//        config.set("google.bigtable.auth.json.keyfile", jsonPath);
-//        Connection conn = BigtableConfiguration.connect(config);
+
             logger.info(session.getClusterName().toString());
+            return session;
 
-
-            try {
-                BigtableTableAdminClient admin = session.getTableAdminClient();
-                admin.createTable(createTableRequest());
-            } catch(io.grpc.StatusRuntimeException sre) {
-                logger.warn("possibly the table already exist",sre);
-            }
-
-//            BulkMutation mutation = session.createBulkMutation();
         } catch(Exception e) {
             logger.error(e.getMessage(),e);
             throw e;
         }
-        logger.warn("connection made");
     }
+
+    public void loadData() throws IOException, GeneralSecurityException {
+        BigtableSession session = getSession();
+        try {
+            BigtableTableAdminClient admin = session.getTableAdminClient();
+            //admin.createTable(createTableRequest());
+        } catch(io.grpc.StatusRuntimeException sre) {
+            logger.warn("possibly the table already exist",sre);
+        }
+
+        BigtableTableName name = new BigtableTableName(PROJECT_INSTANCE + "/tables/" + TABLE_ID);
+        logger.info("Table name " + name.toString());
+
+
+        BulkMutation bulkMutation = session.createBulkMutation(name);
+
+        for(int i = 0; i < 10; i++) {
+            byte[] uniqueValue = new byte[7];
+            new Random().nextBytes(uniqueValue);
+            String uniqueKey =  Long.toString(System.currentTimeMillis()) + "-" + Integer.toHexString(i);
+
+            ByteString key = ByteString.copyFrom("scott01-" +uniqueKey, "utf-8");
+            ByteString value = ByteString.copyFrom("abcedf" + uniqueValue,"utf-8");
+
+            Mutation.SetCell setCell = Mutation.SetCell.newBuilder()
+                    .setFamilyName(COLUMN_FAMILY_NAME).setValue(value).build();
+            Mutation mutation = Mutation.newBuilder().setSetCell(setCell).build();
+
+            ArrayList<Mutation> mutations = new ArrayList<>();
+            mutations.add(mutation);
+            MutateRowRequest request = MutateRowRequest.newBuilder()
+                    .setTableName(TABLE_ID)
+                    .setRowKey(key)
+                    .addAllMutations(mutations)
+                    .build();
+            bulkMutation.add(request);
+            logger.info("added " + key.toString("utf-8") + " = "  + value.toString("utf-8"));
+        }
+    }
+
     public static void main( String[] args )
     {
         System.out.println( "Hello World!" );
         App a = new App();
         try {
             a.listStorage();
-            a.toBigTable();
+            a.loadData();
         } catch (Exception e) {
-
-            System.out.println(e.getMessage());
+            logger.error("failure in process " + e.getMessage(), e);
         }
 
     }
