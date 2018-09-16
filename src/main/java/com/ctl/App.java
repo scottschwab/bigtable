@@ -104,7 +104,7 @@ public class App
         }
     }
 
-    public void loadData() throws IOException, GeneralSecurityException {
+    public void loadData() throws IOException, GeneralSecurityException, InterruptedException {
         BigtableSession session = getSession();
         try {
             BigtableTableAdminClient admin = session.getTableAdminClient();
@@ -119,28 +119,49 @@ public class App
 
         BulkMutation bulkMutation = session.createBulkMutation(name);
 
-        for(int i = 0; i < 10; i++) {
+        ByteString column1 = ByteString.copyFrom("column1","utf-8");
+        ByteString column2 = ByteString.copyFrom("column2","utf-8");
+        ByteString column3 = ByteString.copyFrom("column3","utf-8");
+
+        for(int i = 0; i < 50; i++) {
             byte[] uniqueValue = new byte[7];
             new Random().nextBytes(uniqueValue);
             String uniqueKey =  Long.toString(System.currentTimeMillis()) + "-" + Integer.toHexString(i);
 
             ByteString key = ByteString.copyFrom("scott01-" +uniqueKey, "utf-8");
-            ByteString value = ByteString.copyFrom("abcedf" + uniqueValue,"utf-8");
+            ByteString value1 = ByteString.copyFrom("abcef" + uniqueValue,"utf-8");
+            ByteString value2 = ByteString.copyFrom("ghijkl" + uniqueValue,"utf-8");
+            ByteString value3 = ByteString.copyFrom("mauve_" + uniqueValue,"utf-8");
 
-            Mutation.SetCell setCell = Mutation.SetCell.newBuilder()
-                    .setFamilyName(COLUMN_FAMILY_NAME).setValue(value).build();
-            Mutation mutation = Mutation.newBuilder().setSetCell(setCell).build();
+            Mutation.SetCell setCell1 = Mutation.SetCell.newBuilder()
+                    .setFamilyName(COLUMN_FAMILY_NAME)
+                    .setColumnQualifier(column1)
+                    .setValue(value1).build();
+
+            Mutation.SetCell setCell2 = Mutation.SetCell.newBuilder()
+                    .setFamilyName(COLUMN_FAMILY_NAME)
+                    .setColumnQualifier(column2)
+                    .setValue(value2).build();
+
+            Mutation.SetCell setCell3 = Mutation.SetCell.newBuilder()
+                    .setFamilyName(COLUMN_FAMILY_NAME)
+                    .setColumnQualifier(column3)
+                    .setValue(value3).build();
 
             ArrayList<Mutation> mutations = new ArrayList<>();
-            mutations.add(mutation);
+            mutations.add(Mutation.newBuilder().setSetCell(setCell1).build());
+            mutations.add(Mutation.newBuilder().setSetCell(setCell2).build());
+            mutations.add(Mutation.newBuilder().setSetCell(setCell3).build());
+
             MutateRowRequest request = MutateRowRequest.newBuilder()
                     .setTableName(TABLE_ID)
                     .setRowKey(key)
                     .addAllMutations(mutations)
                     .build();
             bulkMutation.add(request);
-            logger.info("added " + key.toString("utf-8") + " = "  + value.toString("utf-8"));
+            logger.info("added " + key.toString("utf-8"));
         }
+        bulkMutation.flush();
     }
 
     public static void main( String[] args )
